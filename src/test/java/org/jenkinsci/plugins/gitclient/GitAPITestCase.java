@@ -22,6 +22,7 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.RemoteConfig;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.URIish;
+import org.jenkinsci.plugins.gitclient.ChangelogCommand;
 import org.jvnet.hudson.test.Bug;
 import org.jvnet.hudson.test.TemporaryDirectoryAllocator;
 
@@ -209,10 +210,88 @@ public abstract class GitAPITestCase extends TestCase {
         temporaryDirectoryAllocator.dispose();
     }
 
-    public void test_initialize_repository() throws Exception {
-        w.git.init();
-        String status = w.cmd("git status");
-        assertTrue("unexpected status " + status, status.contains("On branch master"));
+    private void check_remote_url(final String repositoryName) throws InterruptedException, IOException {
+        assertEquals("Wrong remote URL", localMirror(), w.git.getRemoteUrl(repositoryName));
+        String remotes = w.cmd("git remote -v");
+        assertTrue("remote URL has not been updated", remotes.contains(localMirror()));
+    }
+
+    private void check_branches(String expectedBranchName) throws InterruptedException {
+        Set<Branch> branches = w.git.getBranches();
+        Collection names = Collections2.transform(branches, new Function<Branch, String>() {
+            public String apply(Branch branch) {
+                return branch.getName();
+            }
+        });
+        assertTrue(expectedBranchName + " branch not listed in " + names, names.contains(expectedBranchName));
+    }
+
+    /** Clone arguments include:
+     *   repositoryName(String) - if omitted, CliGit does not set a remote repo name
+     *   shallow() - no relevant assertion of success or failure of this argument
+     *   shared() - not implemented on CliGit, not verified on JGit
+     *   reference() - not implemented on JGit, not verified on CliGit
+     *
+     * CliGit requires the w.git.checkout() call otherwise no branch
+     * is checked out.  JGit checks out the master branch by default.
+     * That means JGit is nearer to command line git (in that case)
+     * than CliGit is.
+     */
+    public void test_clone() throws IOException, InterruptedException
+    {
+        w.git.clone_().url(localMirror()).repositoryName("origin").execute();
+        if (w.git instanceof CliGitAPIImpl) {
+            w.git.setRemoteUrl("origin", localMirror());
+            w.git.checkout("origin/master", "master");
+        }
+        check_remote_url("origin");
+        check_branches("master");
+    }
+
+    public void test_clone_repositoryName() throws IOException, InterruptedException
+    {
+        w.git.clone_().url(localMirror()).repositoryName("upstream").execute();
+        if (w.git instanceof CliGitAPIImpl) {
+            w.git.setRemoteUrl("upstream", localMirror());
+            w.git.checkout("upstream/master", "master");
+        }
+        check_remote_url("upstream");
+        check_branches("master");
+    }
+
+    public void test_clone_shallow() throws IOException, InterruptedException
+    {
+        w.git.clone_().url(localMirror()).repositoryName("origin").shallow().execute();
+        if (w.git instanceof CliGitAPIImpl) {
+            w.git.setRemoteUrl("origin", localMirror());
+            w.git.checkout("origin/master", "master");
+        }
+        check_remote_url("origin");
+        check_branches("master");
+    }
+
+    /** shared is not implemented in CliGitAPIImpl. */
+    @NotImplementedInCliGit
+    public void test_clone_shared() throws IOException, InterruptedException
+    {
+        w.git.clone_().url(localMirror()).repositoryName("origin").shared().execute();
+        if (w.git instanceof CliGitAPIImpl) {
+            w.git.setRemoteUrl("origin", localMirror());
+            w.git.checkout("origin/master", "master");
+        }
+        check_remote_url("origin");
+        check_branches("master");
+    }
+
+    public void test_clone_reference() throws IOException, InterruptedException
+    {
+        w.git.clone_().url(localMirror()).repositoryName("origin").reference(localMirror()).execute();
+        if (w.git instanceof CliGitAPIImpl) {
+            w.git.setRemoteUrl("origin", localMirror());
+            w.git.checkout("origin/master", "master");
+        }
+        check_remote_url("origin");
+        check_branches("master");
     }
 
     public void test_detect_commit_in_repo() throws Exception {
@@ -225,6 +304,35 @@ public abstract class GitAPITestCase extends TestCase {
         assertFalse(w.git.isCommitInRepo(ObjectId.fromString("1111111111111111111111111111111111111111")));
     }
 
+    @Deprecated
+    public void test_lsTree_non_recursive() throws IOException, InterruptedException {
+        w.init();
+        w.touch("file1", "file1 fixed content");
+        w.add("file1");
+        w.commit("commit1");
+        String expectedBlobSHA1 = "3f5a898e0c8ea62362dbf359cf1a400f3cfd46ae";
+        List<IndexEntry> tree = w.igit().lsTree("HEAD", false);
+        assertEquals("Wrong blob sha1", expectedBlobSHA1, tree.get(0).getObject());
+        assertEquals("Wrong number of tree entries", 1, tree.size());
+    }
+
+    @Deprecated
+    public void test_lsTree_recursive() throws IOException, InterruptedException {
+        w.init();
+        w.file("dir1").mkdir();
+        w.touch("dir1/file1", "dir1/file1 fixed content");
+        w.add("dir1/file1");
+        w.touch("file2", "file2 fixed content");
+        w.add("file2");
+        w.commit("commit-dir-and-file");
+        String expectedBlob1SHA1 = "a3ee484019f0576fcdeb48e682fa1058d0c74435";
+        String expectedBlob2SHA1 = "aa1b259ac5e8d6cfdfcf4155a9ff6836b048d0ad";
+        List<IndexEntry> tree = w.igit().lsTree("HEAD", true);
+        assertEquals("Wrong blob 1 sha1", expectedBlob1SHA1, tree.get(0).getObject());
+        assertEquals("Wrong blob 2 sha1", expectedBlob2SHA1, tree.get(1).getObject());
+        assertEquals("Wrong number of tree entries", 2, tree.size());
+    }
+    
     /** Is implemented in JGit, but returns an empty URL for this
      * case.  Test is disabled for JGit, since it is a deprecated API
      * that we can hope is not used with the newer JGit
@@ -454,9 +562,21 @@ public abstract class GitAPITestCase extends TestCase {
         w.tag("another_test");
         w.tag("yet_another");
         Set<String> tags = w.git.getTagNames("*test");
-        assertTrue("expected tag not listed", tags.contains("test"));
-        assertTrue("expected tag not listed", tags.contains("another_test"));
-        assertFalse("unexpected tag listed", tags.contains("yet_another"));
+        assertTrue("expected tag test not listed", tags.contains("test"));
+        assertTrue("expected tag another_test not listed", tags.contains("another_test"));
+        assertFalse("unexpected yet_another tag listed", tags.contains("yet_another"));
+    }
+
+    public void test_list_tags_without_filter() throws Exception {
+        w.init();
+        w.commit("init");
+        w.tag("test");
+        w.tag("another_test");
+        w.tag("yet_another");
+        Set<String> allTags = w.git.getTagNames(null);
+        assertTrue("tag 'test' not listed", allTags.contains("test"));
+        assertTrue("tag 'another_test' not listed", allTags.contains("another_test"));
+        assertTrue("tag 'yet_another' not listed", allTags.contains("yet_another"));
     }
 
     public void test_tag_exists() throws Exception {
@@ -778,6 +898,31 @@ public abstract class GitAPITestCase extends TestCase {
         assertTrue(heads.containsKey("refs/heads/master"));
     }
 
+    private void check_changelog_sha1(final String sha1, final String branchName) throws InterruptedException
+    {
+        ChangelogCommand changelogCommand = w.git.changelog();
+        changelogCommand.max(1);
+        StringWriter writer = new StringWriter();
+        changelogCommand.to(writer);
+        changelogCommand.execute();
+        String splitLog[] = writer.toString().split("[\\n\\r]", 3); // Extract first line of changelog
+        assertEquals("Wrong changelog line 1 on branch " + branchName, "commit " + sha1, splitLog[0]);
+    }
+
+    /* Is implemented in JGit, but returns no results.  Temporarily
+     * marking this test as not implemented in JGit so that its
+     * failure does not distract from other development.
+     */
+    @NotImplementedInJGit
+    public void test_changelog() throws Exception {
+        w = clone(localMirror());
+        String sha1Prev = w.revParse("HEAD").name();
+        w.touch("changelog-file", "changelog-file-content-" + sha1Prev);
+        w.add("changelog-file");
+        w.commit("changelog-commit-message");
+        String sha1 = w.revParse("HEAD").name();
+        check_changelog_sha1(sha1, "master");
+    }
 
     public void test_show_revision_for_merge() throws Exception {
         w = clone(localMirror());

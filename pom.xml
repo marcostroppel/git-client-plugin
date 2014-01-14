@@ -7,7 +7,7 @@
   </parent>
 
   <artifactId>git-client</artifactId>
-  <version>1.6.1</version>
+  <version>1.6.1a</version>
   <packaging>hpi</packaging>
   <name>Jenkins GIT client plugin</name>
   <description>Utility plugin for Git support in Jenkins</description>
@@ -129,6 +129,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>2.16</version>
                 <configuration>
+                    <!--<skipTests>true</skipTests>-->
                     <!-- Sets the VM argument line used when unit tests are run. -->
                     <argLine>${surefireArgLine}</argLine>
                 </configuration>

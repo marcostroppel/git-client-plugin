@@ -567,7 +567,14 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 args.add("--reference", reference);
         }
 
-        launchCommand(args);
+        String remoteName = getDefaultRemote();
+
+        String url = getRemoteUrl(remoteName);
+
+        StandardCredentials cred = credentials.get(url);
+        if (cred == null) cred = defaultCredentials;
+        
+        launchCommandWithCredentials(args, workspace, cred, url);
     }
 
     /**
@@ -961,7 +968,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
                     String urlWithCredentials = getGitCredentialsURL(url, credentials);
                     store = createGitCredentialsStore(urlWithCredentials);
-                    launchCommandIn(workDir, "config", "--local", "credential.helper", "store --file=\\\"" + store.getAbsolutePath() + "\\\"");
+                    launchCommandIn(workDir, "config", "--global", "credential.helper", "store --file=\\\"" + store.getAbsolutePath() + "\\\"");
                 }
             }
 
@@ -975,7 +982,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
             if (store != null) {
                 store.delete();
                 try {
-                    launchCommandIn(workDir, "config", "--local", "--remove-section", "credential");
+                    launchCommandIn(workDir, "config", "--global", "--remove-section", "credential");
                 } catch (GitException e) {
                     listener.getLogger().println("Could not remove the credential section from the git configuration");
                 }
